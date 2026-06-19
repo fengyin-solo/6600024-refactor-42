@@ -17,8 +17,8 @@
             :stroke-width="8"
           />
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('temp_sensor')"></span>
-            {{ getNodeQuality('temp_sensor') }}
+            <span class="quality-dot" :class="qualityClassOf('temp_sensor')"></span>
+            {{ qualityLabelOf('temp_sensor') }}
           </div>
         </div>
 
@@ -35,8 +35,8 @@
             :stroke-width="8"
           />
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('pressure_transmitter')"></span>
-            {{ getNodeQuality('pressure_transmitter') }}
+            <span class="quality-dot" :class="qualityClassOf('pressure_transmitter')"></span>
+            {{ qualityLabelOf('pressure_transmitter') }}
           </div>
         </div>
 
@@ -53,8 +53,8 @@
             :stroke-width="8"
           />
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('flow_meter')"></span>
-            {{ getNodeQuality('flow_meter') }}
+            <span class="quality-dot" :class="qualityClassOf('flow_meter')"></span>
+            {{ qualityLabelOf('flow_meter') }}
           </div>
         </div>
 
@@ -71,8 +71,8 @@
             :stroke-width="8"
           />
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('valve_position')"></span>
-            {{ getNodeQuality('valve_position') }}
+            <span class="quality-dot" :class="qualityClassOf('valve_position')"></span>
+            {{ qualityLabelOf('valve_position') }}
           </div>
         </div>
 
@@ -89,8 +89,8 @@
             :stroke-width="8"
           />
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('motor_speed')"></span>
-            {{ getNodeQuality('motor_speed') }}
+            <span class="quality-dot" :class="qualityClassOf('motor_speed')"></span>
+            {{ qualityLabelOf('motor_speed') }}
           </div>
         </div>
 
@@ -104,8 +104,8 @@
             <el-icon :size="32"><CircleCheckFilled v-if="pumpStatus" /><CircleCloseFilled v-else /></el-icon>
           </div>
           <div class="gauge-quality">
-            <span class="quality-dot" :class="getQualityClass('pump_status')"></span>
-            {{ getNodeQuality('pump_status') }}
+            <span class="quality-dot" :class="qualityClassOf('pump_status')"></span>
+            {{ qualityLabelOf('pump_status') }}
           </div>
         </div>
       </div>
@@ -138,91 +138,99 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components'
 import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { useOpcuaStore } from '../store/opcua'
+import {
+  getNodeCurrentValue,
+  getNodeCurrentQuality,
+  getQualityClass
+} from '../utils/nodeTreeUtils'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, TitleComponent])
 
 const store = useOpcuaStore()
 
-// 获取节点当前值
-function getNodeValue(nodeId: string): number | boolean {
-  const data = store.realTimeData.get(nodeId)
-  if (data) return data.value as number | boolean
-  const node = findNodeById(nodeId)
-  return node?.value ?? 0
+interface ThresholdColorConfig {
+  thresholds: Array<{ value: number; textClass: string; barColor: string }>
+  defaultTextClass: string
+  defaultBarColor: string
 }
 
-function getNodeQuality(nodeId: string): string {
-  const data = store.realTimeData.get(nodeId)
-  if (data) return data.quality
-  const node = findNodeById(nodeId)
-  return node?.quality ?? 'Unknown'
-}
-
-function findNodeById(id: string) {
-  function search(nodes: any[]): any {
-    for (const node of nodes) {
-      if (node.id === id) return node
-      if (node.children) {
-        const found = search(node.children)
-        if (found) return found
-      }
-    }
-    return null
+const THRESHOLD_CONFIGS: Record<string, ThresholdColorConfig> = {
+  temp_sensor: {
+    thresholds: [
+      { value: 30, textClass: 'text-red-400', barColor: '#f56c6c' },
+      { value: 28, textClass: 'text-yellow-400', barColor: '#e6a23c' }
+    ],
+    defaultTextClass: 'text-green-400',
+    defaultBarColor: '#67c23a'
+  },
+  pressure_transmitter: {
+    thresholds: [
+      { value: 4.5, textClass: 'text-red-400', barColor: '#f56c6c' },
+      { value: 4.0, textClass: 'text-yellow-400', barColor: '#e6a23c' }
+    ],
+    defaultTextClass: 'text-cyan-400',
+    defaultBarColor: '#06b6d4'
+  },
+  motor_speed: {
+    thresholds: [
+      { value: 1600, textClass: 'text-red-400', barColor: '#f56c6c' },
+      { value: 1550, textClass: 'text-yellow-400', barColor: '#e6a23c' }
+    ],
+    defaultTextClass: 'text-emerald-400',
+    defaultBarColor: '#34d399'
   }
-  return search(store.nodeTree)
 }
 
-function getQualityClass(nodeId: string): string {
-  const quality = getNodeQuality(nodeId)
-  return quality === 'Good' ? 'quality-good' : quality === 'Bad' ? 'quality-bad' : 'quality-uncertain'
+function resolveValueClass(nodeId: string, val: number): string {
+  const config = THRESHOLD_CONFIGS[nodeId]
+  if (!config) return ''
+  for (const t of config.thresholds) {
+    if (val > t.value) return t.textClass
+  }
+  return config.defaultTextClass
 }
 
-// 实时数值
-const temperature = computed(() => getNodeValue('temp_sensor') as number || 25)
-const pressure = computed(() => getNodeValue('pressure_transmitter') as number || 3.5)
-const flow = computed(() => getNodeValue('flow_meter') as number || 150)
-const valvePosition = computed(() => getNodeValue('valve_position') as number || 75)
-const motorSpeed = computed(() => getNodeValue('motor_speed') as number || 1480)
-const pumpStatus = computed(() => getNodeValue('pump_status') as boolean)
-
-// 温度和颜色判断
-function getTempClass(val: number) {
-  if (val > 30) return 'text-red-400'
-  if (val > 28) return 'text-yellow-400'
-  return 'text-green-400'
+function resolveBarColor(nodeId: string, val: number): string {
+  const config = THRESHOLD_CONFIGS[nodeId]
+  if (!config) return '#64748b'
+  for (const t of config.thresholds) {
+    if (val > t.value) return t.barColor
+  }
+  return config.defaultBarColor
 }
 
-function getTempColor(val: number) {
-  if (val > 30) return '#f56c6c'
-  if (val > 28) return '#e6a23c'
-  return '#67c23a'
+function readNumericValue(nodeId: string, fallback: number): number {
+  const v = getNodeCurrentValue(nodeId, store.nodeTree, store.realTimeData)
+  return (typeof v === 'number' ? v : fallback)
 }
 
-function getPressureClass(val: number) {
-  if (val > 4.5) return 'text-red-400'
-  if (val > 4.0) return 'text-yellow-400'
-  return 'text-cyan-400'
+function readBooleanValue(nodeId: string): boolean {
+  const v = getNodeCurrentValue(nodeId, store.nodeTree, store.realTimeData)
+  return typeof v === 'boolean' ? v : false
 }
 
-function getPressureColor(val: number) {
-  if (val > 4.5) return '#f56c6c'
-  if (val > 4.0) return '#e6a23c'
-  return '#06b6d4'
+function qualityLabelOf(nodeId: string): string {
+  return getNodeCurrentQuality(nodeId, store.nodeTree, store.realTimeData)
 }
 
-function getSpeedClass(val: number) {
-  if (val > 1600) return 'text-red-400'
-  if (val > 1550) return 'text-yellow-400'
-  return 'text-emerald-400'
+function qualityClassOf(nodeId: string): string {
+  return getQualityClass(qualityLabelOf(nodeId))
 }
 
-function getSpeedColor(val: number) {
-  if (val > 1600) return '#f56c6c'
-  if (val > 1550) return '#e6a23c'
-  return '#34d399'
-}
+const temperature = computed(() => readNumericValue('temp_sensor', 25))
+const pressure = computed(() => readNumericValue('pressure_transmitter', 3.5))
+const flow = computed(() => readNumericValue('flow_meter', 150))
+const valvePosition = computed(() => readNumericValue('valve_position', 75))
+const motorSpeed = computed(() => readNumericValue('motor_speed', 1480))
+const pumpStatus = computed(() => readBooleanValue('pump_status'))
 
-// 构建趋势图
+function getTempClass(val: number) { return resolveValueClass('temp_sensor', val) }
+function getTempColor(val: number) { return resolveBarColor('temp_sensor', val) }
+function getPressureClass(val: number) { return resolveValueClass('pressure_transmitter', val) }
+function getPressureColor(val: number) { return resolveBarColor('pressure_transmitter', val) }
+function getSpeedClass(val: number) { return resolveValueClass('motor_speed', val) }
+function getSpeedColor(val: number) { return resolveBarColor('motor_speed', val) }
+
 function buildChartOption(title: string, nodeId: string, color: string, unit: string) {
   const history = store.dataHistory.get(nodeId) || []
   const data = history.map(h => [h.timestamp, h.value])
